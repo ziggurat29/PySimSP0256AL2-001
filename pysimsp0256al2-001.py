@@ -4,8 +4,10 @@
 #Q:  can a reasonable approximation be made simply by appending
 #pre-recorded phonemes?
 #  A:  it is a little klunky, but it seems intelligible.
-#Can my old text-to-speech code be ported and made to work?
+#Q:  Can my old text-to-speech code be ported and made to work?
 #  A:  it seems so
+#Q:  Can the recordings be compressed via ADPCM and still get acceptable quality?
+#  A:  it appears so; halves the size
 
 #this was written assuming an Anaconda environment, but it should work fine
 #in a conventional python environment provided you have the requisite packages.
@@ -243,7 +245,7 @@ testcase_001 = [
 
 #=========================================================================
 #Text2Speech rules
-#XXX WIP as I try to understand my original work
+
 
 #This implementation is derived from the following research:
 '''
@@ -1657,7 +1659,7 @@ Uh, keep a cooling, baby"""
 
 phonemes = []
 _texttospeech ( strText, phonemes )
-whizanddump ( 'wholelottalove.wav', phonemes )
+#whizanddump ( 'wholelottalove.wav', phonemes )
 
 
 
@@ -1812,6 +1814,326 @@ _texttospeech ( strText, phonemes )
 #whizanddump ( 'jabberwocky.wav', phonemes )
 
 
+
+
+#Kraftwerk Computer World
+strText = R"""Interpol and Deutsche Bank, FBI and Scotland Yard
+Interpol and Deutsche Bank, FBI and Scotland Yard
+Business, Numbers, Money, People
+Business, Numbers, Money, People
+Computer World
+Computer World
+Interpol and Deutsche Bank, FBI and Scotland Yard
+Interpol and Deutsche Bank, FBI and Scotland Yard
+Business, Numbers, Money, People
+Business, Numbers, Money, People
+Computer World
+Computer World
+Interpol and Deutsche Bank, FBI and Scotland Yard
+Interpol and Deutsche Bank, FBI and Scotland Yard
+Crime, Travel, Communication, Entertainment
+Crime, Travel, Communication, Entertainment
+Computer World
+Computer World"""
+
+
+phonemes = []
+_texttospeech ( strText, phonemes )
+#whizanddump ( 'computerworld.wav', phonemes )
+
+
+
+#=========================================================================
+#ADPCM experiment
+
+#we will which through phoneme_list, and then ADPCM encode the audio, and make
+#a new collection with that.  Then immediately ADPCM decode that same audio
+#into another collection.
+#The purpose of this test is to see if the quality suffers unacceptably
+#relative to the uncompressed form.
+
+
+#this ADPCM codec is an implementation of the IMA algorithm.  That algorithm
+#avoids float arithmetic, so is particularly useful for embedded devices.
+
+
+#'Index Change' table; indexed by adpcm code
+IndexChange = [
+	-1, -1, -1, -1, 2, 4, 6, 8,
+	-1, -1, -1, -1, 2, 4, 6, 8,
+]
+
+
+#'Quantizer Step Size' lookup table
+QuantStepSize = [
+	    7,     8,     9,    10,    11,    12,    13,    14,    16,    17,
+	   19,    21,    23,    25,    28,    31,    34,    37,    41,    45,
+	   50,    55,    60,    66,    73,    80,    88,    97,   107,   118,
+	  130,   143,   157,   173,   190,   209,   230,   253,   279,   307,
+	  337,   371,   408,   449,   494,   544,   598,   658,   724,   796,
+	  876,   963,  1060,  1166,  1282,  1411,  1552,  1707,  1878,  2066,
+	 2272,  2499,  2749,  3024,  3327,  3660,  4026,  4428,  4871,  5358,
+	 5894,  6484,  7132,  7845,  8630,  9493, 10442, 11487, 12635, 13899,
+	15289, 16818, 18500, 20350, 22385, 24623, 27086, 29794, 32767
+]
+
+
+
+def adpcm_encode_sample ( sample, state ):
+	#setup
+	predsample = state['prevsample']
+	index = state['previndex']
+	step = QuantStepSize[index]
+	#compute the difference between current and previous
+	diff = sample - predsample
+	if(diff >= 0):	#signed 4 bit (1-cpl)
+		code = 0
+	else:
+		code = 8
+		diff = -diff
+	#quantize the difference into the adpcm code using the quantizer step size
+	diffq = step >> 3
+	if( diff >= step ):
+		code |= 4;
+		diff -= step;
+		diffq += step;
+	step >>= 1
+	if( diff >= step ):
+		code |= 2
+		diff -= step
+		diffq += step
+	step >>= 1
+	if( diff >= step ):
+		code |= 1
+		diffq += step
+	#predict as previous plus delta
+	if( code & 8 ):	#signed 4 bit (1-cpl)
+		predsample -= diffq
+	else:
+		predsample += diffq
+	#clip to int16 range
+	if( predsample > 32767 ):
+		predsample = 32767
+	elif( predsample < -32767 ):
+		predsample = -32767
+	#update quantizer step size base on code
+	index += IndexChange[code]
+	#clip index to bounds
+	if( index < 0 ):
+		index = 0
+	elif( index > 88 ):
+		index = 88
+	#update the state for next prediction
+	state['prevsample'] = predsample
+	state['previndex'] = index
+	#tada!
+	return ( code & 0x0f )
+
+
+
+def adpcm_decode_sample ( code, state ):
+	#setup
+	predsample = state['prevsample']
+	index = state['previndex']
+	#get quantizer step size
+	step = QuantStepSize[index]
+	#compute difference
+	diffq = step >> 3
+	if( code & 4 ):
+		diffq += step
+	if( code & 2 ):
+		diffq += step >> 1
+	if( code & 1 ):
+		diffq += step >> 2
+	#predict as previous plus delta
+	if( code & 8 ):	#signed 4 bit (1-cpl)
+		predsample -= diffq
+	else:
+		predsample += diffq
+	#clip to int16 range
+	if( predsample > 32767 ):
+		predsample = 32767
+	elif( predsample < -32767 ):
+		predsample = -32767
+	#update quantizer step size base on code
+	index += IndexChange[code]
+	#clip index to bounds
+	if( index < 0 ):
+		index = 0
+	elif( index > 88 ):
+		index = 88
+	#update the state for next prediction
+	state['prevsample'] = predsample
+	state['previndex'] = index
+	#tada!
+	return ( predsample )
+
+
+
+def adpcm_encode_all ( samples ):
+	state = {
+		'prevsample': 0,	#Predicted sample
+		'previndex': 0		#Index into step size table
+	}
+
+	encoded = np.empty((0), dtype=np.uint8)
+	for idx in range ( 0, len(samples), 2 ):	#two samples -> 1 code
+		#convert to int16 for the algorithm; we know the source is uint8
+		sampleHigh = ( samples[idx] - 128 ) * 256
+		if ( idx+1 == len(samples) ):
+			sampleLow = sampleHigh	#dummy value since input might have odd length
+		else:
+			sampleLow = ( samples[idx+1] - 128 ) * 256
+		codeHigh = adpcm_encode_sample ( sampleHigh, state )	#first in high nybble
+		codeLow = adpcm_encode_sample ( sampleLow, state )	#second in low nybble
+		code = (codeHigh << 4) | codeLow
+		encoded = np.append ( encoded, code )
+
+	#ensure we get back to uint8_t
+	np.clip ( encoded, 0, 255, out=encoded )
+	encoded = encoded.astype('uint8')
+
+	return encoded
+
+
+def adpcm_decode_all ( codes ):
+	state = {
+		'prevsample' : 0,	#Predicted sample
+		'previndex' : 0		#Index into step size table
+	}
+
+	decoded = np.empty((0), dtype=np.uint8)
+	for code in codes:
+		sampleHigh = adpcm_decode_sample ( code >> 4, state )
+		sampleLow = adpcm_decode_sample ( code & 0x0f, state )
+		#convert to uint8
+		sampleHigh = int ( ( sampleHigh / 256 ) + 128 )
+		sampleLow = int ( ( sampleLow / 256 ) + 128 )
+		decoded = np.append ( decoded, sampleHigh )
+		decoded = np.append ( decoded, sampleLow )
+
+	#ensure we get back to uint8_t
+	np.clip ( decoded, 0, 255, out=decoded )
+	decoded = decoded.astype('uint8')
+
+	return decoded
+
+
+
+#our new collections
+phoneme_list_adpcm = []
+phoneme_list_2 = []
+
+
+#for each phoneme in 'phoneme_list', 
+for item in phoneme_list:
+	#print ( "for phoneme: " + item[1] + " (" + str(item[0]) + "), original (" + str(len(item[2])) + "):" )
+	#print ( item[2] )
+
+	encoded = adpcm_encode_all ( item[2] )
+	item_adpcm = [ item[0], item[1], encoded, len(item[2]) ]
+	phoneme_list_adpcm.append ( item_adpcm )
+
+	#print ( "encoded (" + str(len(encoded)) + "):" )
+	#print ( encoded )
+
+	decoded = adpcm_decode_all ( item_adpcm[2] )
+	#print ( decoded.dtype )
+	#truncate as needed to original length
+	decoded = decoded[0:item_adpcm[3]]
+	item_2 = [ item[0], item[1], decoded ]
+	phoneme_list_2.append ( item_2 )
+
+	#print ( "decoded (" + str(len(decoded)) + "):" )
+	#print ( decoded )
+
+
+#print ( phoneme_list_adpcm[48] )
+#print ( phoneme_list_2[48] )
+
+
+#make new lookup table with our adpcm decoded audio
+phoneme_code_2 = {}
+for item in phoneme_list_2:
+	phoneme_code_2[item[0]] = item
+
+
+#same as whizanddump, but with the adpcm audio
+def whizanddump_adpcm ( filename, phonemeseq ):
+	#for each phoneme in phonemeseq, lookup the audio and append it to the
+	#output we are building
+	output = np.empty((0), dtype=np.uint8)
+	#print ( output )
+	for val in phonemeseq:
+		#print ( "for file: '" + filename + "', emitting: " + phoneme_code[val][1] + " (" + str(val) + ")" )
+		output = np.append ( output, phoneme_code_2[val][2] )
+	write ( filename, 11000, output )
+	#print ( output )
+
+
+
+#run the testcase_001 using the ADPCM transcoded phoneme so we can see if we hear the difference significantly
+#whizanddump_adpcm ( 'testcase_001a.wav', testcase_001 )
+
+
+
+#=========================================================================
+#for the embedded, run through the phoneme_code_2 table and emit C structures
+#of the data
+
+
+def emit_adpcm_c_files():
+	with open ( "phonemes_adpcm.h", "w" ) as fp:
+		fp.write ( "#ifndef __PHONEMES_ADPCM_H\n" )
+		fp.write ( "#define __PHONEMES_ADPCM_H\n\n" )
+		fp.write ( "#ifdef __cplusplus\n" )
+		fp.write ( "extern \"C\" {\n" )
+		fp.write ( "#endif\n\n" )
+
+		fp.write ( "#include <stdint.h>\n\n" )
+		fp.write ( "struct PhonemeEntry {\n" )
+		fp.write ( "	const uint8_t*	_pbyADPCM;	//the ADPCM data for this phoneme\n" )
+		fp.write ( "	uint16_t	_nLenComp;		//the compressed length\n" )
+		fp.write ( "	uint16_t	_nLenUnc;		//the uncompressed length\n" )
+		fp.write ( "};\n\n" )
+
+		fp.write ( "extern const struct PhonemeEntry g_apePhonemes[];\n\n" )
+
+		fp.write ( "#ifdef __cplusplus\n" )
+		fp.write ( "}\n" )
+		fp.write ( "#endif\n\n" )
+		fp.write ( "#endif\n" )
+
+
+	with open ( "phonemes_adpcm.c", "w" ) as fp:
+		fp.write ( "#include \"phonemes_adpcm.h\"\n\n" )
+
+		#emit the phoneme data arrays
+		for item in phoneme_list_adpcm:
+			#item[0]	#code
+			#item[1]	#name
+			#item[2]	#adpcm
+			#item[3]	#uncompressed length
+
+			fp.write ( f"//phoneme '{item[1]}' 0x{item[0]:02x} ({item[0]}), len {len(item[2])}\n" )
+			fp.write ( f"const uint8_t g_aby{item[1]}[] = {{\n" )
+
+			for idx in range ( 0, len(item[2]) ):
+				val = item[2][idx]
+				str = f"0x{val:02x}, "
+				fp.write ( str )
+				if ( 15 == idx % 16 ):
+					fp.write ( "\n" )
+			fp.write ( "\n};\n" )
+
+		#emit the index by code
+		fp.write ( "const struct PhonemeEntry g_apePhonemes[] = {\n" )
+		for item in phoneme_list_adpcm:
+			fp.write ( f"{{ g_aby{item[1]}, {len(item[2])}, {item[3]} }},\n" )
+		fp.write ( "\n};\n" )
+
+
+#emit_adpcm_c_files()
 
 
 print ( 'finishing' )
