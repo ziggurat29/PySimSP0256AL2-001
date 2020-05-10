@@ -2136,4 +2136,68 @@ def emit_adpcm_c_files():
 #emit_adpcm_c_files()
 
 
+
+#=========================================================================
+#initial testing of feasibility of simulating the sp0256 in the BluePill alone
+#by storing PCM (to sanity check the PWM out) and ADPCM (for practical
+#flash size reasons).
+
+
+def whizanddump_pcm_c ( filename, phonemeseq ):
+
+	#make pcm output
+	pcm = np.empty((0), dtype=np.uint8)
+	for val in phonemeseq:
+		pcm = np.append ( pcm, phoneme_code[val][2] )
+
+	#spew C file
+	with open ( filename, "w" ) as fp:
+		fp.write ( "#include <stdint.h>\n\n" )
+
+		fp.write ( f"//len = {len(pcm)}\n" )
+		fp.write ( "const uint8_t g_abyPCM[] = {\n" )
+		for idx in range ( 0, len(pcm) ):
+			val = pcm[idx]
+			str = f"0x{val:02x}, "
+			fp.write ( str )
+			if ( 15 == idx % 16 ):
+				fp.write ( "\n" )
+		fp.write ( "\n};\n" )
+
+
+def whizanddump_adpcm_c ( filename, phonemeseq ):
+
+	#make pcm output
+	pcm = np.empty((0), dtype=np.uint8)
+	for val in phonemeseq:
+		pcm = np.append ( pcm, phoneme_code[val][2] )
+	adpcm = adpcm_encode_all ( pcm )
+
+	#spew C file
+	with open ( filename, "w" ) as fp:
+		fp.write ( "#include <stdint.h>\n\n" )
+
+		fp.write ( f"//len = {len(adpcm)}, origlen = {len(pcm)}\n" )
+		fp.write ( "const uint8_t g_abyADPCM[] = {\n" )
+		for idx in range ( 0, len(adpcm) ):
+			val = adpcm[idx]
+			str = f"0x{val:02x}, "
+			fp.write ( str )
+			if ( 15 == idx % 16 ):
+				fp.write ( "\n" )
+		fp.write ( "\n};\n" )
+
+
+#just a short message that can be played with a simple PWM loop in an ISR,
+#before I go all-in making the full simulator
+testcase_100 = [
+#"Hello
+0x1B, 0x07, 0x2D, 0x35, 0x03
+]
+
+#whizanddump_pcm_c ( "testcase_100_pcm.c", testcase_100 )
+#whizanddump_adpcm_c ( "testcase_100_adpcm.c", testcase_100 )
+
+
+
 print ( 'finishing' )
