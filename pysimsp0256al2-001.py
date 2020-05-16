@@ -12,6 +12,7 @@
 #this was written assuming an Anaconda environment, but it should work fine
 #in a conventional python environment provided you have the requisite packages.
 
+import sys
 import numpy as np
 from scipy.io.wavfile import read, write
 import pickle
@@ -118,6 +119,8 @@ for item in phoneme_list:
 #pickling the collection to avoid the wavfile bug for others
 with open ( "phonemes.bin", "wb" ) as fp:
 	pickle.dump ( phoneme_list, fp )
+
+sys.exit(0)
 '''
 
 #unpickling the collection that was created as above
