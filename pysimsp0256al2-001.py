@@ -22,6 +22,12 @@ import pickle
 #%matplotlib inline
 
 
+#we have a couple collections of phoneme recordings at different sample rates.
+#the sample rate also is used to concoct filenames.
+phonemesamplerate = 8000
+#phonemesamplerate = 11025
+
+
 #=========================================================================
 
 #array of tuples of the SP-0256 phonemes; name, number, audio.
@@ -104,10 +110,10 @@ phoneme_list = [
 
 print ( 'reading audio' )
 #for each phoneme in 'phoneme_list', concoct a filename as
-#  'allophones/' + name + '.wav'
+#  'allophones/' + str(phonemesamplerate) + '/' + name + '.wav'
 #and load it.
 for item in phoneme_list:
-	filename = 'allophones/' + item[1].lower() + '.wav'
+	filename = 'allophones/' + str(phonemesamplerate) + '/' + item[1].lower() + '.wav'
 	#print(filename)
 	fs,data = read(filename)	#fs is sampling rate, data is audio samples
 	#the above will sometimes trigger an apparent bug in wavfile.py
@@ -117,7 +123,7 @@ for item in phoneme_list:
 
 
 #pickling the collection to avoid the wavfile bug for others
-with open ( "phonemes.bin", "wb" ) as fp:
+with open ( "phonemes_" + str(phonemesamplerate) + ".bin", "wb" ) as fp:
 	pickle.dump ( phoneme_list, fp )
 
 sys.exit(0)
@@ -125,7 +131,8 @@ sys.exit(0)
 
 #unpickling the collection that was created as above
 phoneme_list = []
-with open ( "phonemes.bin", "rb" ) as fp:
+phonemesfilename = "phonemes_" + str(phonemesamplerate) + ".bin"
+with open ( phonemesfilename, "rb" ) as fp:
 	phoneme_list = pickle.load ( fp )
 
 
@@ -156,7 +163,7 @@ def whizanddump ( filename, phonemeseq ):
 	for val in phonemeseq:
 		#print ( "for file: '" + filename + "', emitting: " + phoneme_code[val][1] + " (" + str(val) + ")" )
 		output = np.append ( output, phoneme_code[val][2] )
-	write ( filename, 11000, output )
+	write ( filename, phonemesamplerate, output )
 	#print ( output )
 
 
@@ -2070,7 +2077,7 @@ def whizanddump_adpcm ( filename, phonemeseq ):
 	for val in phonemeseq:
 		#print ( "for file: '" + filename + "', emitting: " + phoneme_code[val][1] + " (" + str(val) + ")" )
 		output = np.append ( output, phoneme_code_2[val][2] )
-	write ( filename, 11000, output )
+	write ( filename, phonemesamplerate, output )
 	#print ( output )
 
 
@@ -2086,21 +2093,23 @@ def whizanddump_adpcm ( filename, phonemeseq ):
 
 
 def emit_adpcm_c_files():
-	with open ( "phonemes_adpcm.h", "w" ) as fp:
-		fp.write ( "#ifndef __PHONEMES_ADPCM_H\n" )
-		fp.write ( "#define __PHONEMES_ADPCM_H\n\n" )
+	basefilename = "phonemes_adpcm_" + str(phonemesamplerate)
+	guardsymbol = "__PHONEMES_ADPCM_" + str(phonemesamplerate) + "_H"
+	with open ( basefilename + ".h", "w" ) as fp:
+		fp.write ( "#ifndef " + guardsymbol + "\n" )
+		fp.write ( "#define " + guardsymbol + "\n\n" )
 		fp.write ( "#ifdef __cplusplus\n" )
 		fp.write ( "extern \"C\" {\n" )
 		fp.write ( "#endif\n\n" )
 
 		fp.write ( "#include <stdint.h>\n\n" )
-		fp.write ( "struct PhonemeEntry {\n" )
+		fp.write ( "typedef struct PhonemeEntry {\n" )
 		fp.write ( "	const uint8_t*	_pbyADPCM;	//the ADPCM data for this phoneme\n" )
 		fp.write ( "	uint16_t	_nLenComp;		//the compressed length\n" )
 		fp.write ( "	uint16_t	_nLenUnc;		//the uncompressed length\n" )
-		fp.write ( "};\n\n" )
+		fp.write ( "} PhonemeEntry;\n\n" )
 
-		fp.write ( "extern const struct PhonemeEntry g_apePhonemes[];\n\n" )
+		fp.write ( "extern const struct PhonemeEntry g_apePhonemes_" + str(phonemesamplerate) + "[];\n\n" )
 
 		fp.write ( "#ifdef __cplusplus\n" )
 		fp.write ( "}\n" )
@@ -2108,8 +2117,8 @@ def emit_adpcm_c_files():
 		fp.write ( "#endif\n" )
 
 
-	with open ( "phonemes_adpcm.c", "w" ) as fp:
-		fp.write ( "#include \"phonemes_adpcm.h\"\n\n" )
+	with open ( basefilename + ".c", "w" ) as fp:
+		fp.write ( "#include \"" + basefilename + ".h\"\n\n" )
 
 		#emit the phoneme data arrays
 		for item in phoneme_list_adpcm:
@@ -2118,21 +2127,21 @@ def emit_adpcm_c_files():
 			#item[2]	#adpcm
 			#item[3]	#uncompressed length
 
-			fp.write ( f"//phoneme '{item[1]}' 0x{item[0]:02x} ({item[0]}), len {len(item[2])}\n" )
-			fp.write ( f"const uint8_t g_aby{item[1]}[] = {{\n" )
+			fp.write ( f"//phoneme '{item[1]}' 0x{item[0]:02x} ({item[0]}), compressed {len(item[2])}, original {item[3]}\n" )
+			fp.write ( f"const uint8_t g_aby{item[1]}_{phonemesamplerate}[] = {{\n" )
 
 			for idx in range ( 0, len(item[2]) ):
 				val = item[2][idx]
-				str = f"0x{val:02x}, "
-				fp.write ( str )
+				text = f"0x{val:02x}, "
+				fp.write ( text )
 				if ( 15 == idx % 16 ):
 					fp.write ( "\n" )
 			fp.write ( "\n};\n" )
 
 		#emit the index by code
-		fp.write ( "const struct PhonemeEntry g_apePhonemes[] = {\n" )
+		fp.write ( "const struct PhonemeEntry g_apePhonemes_" + str(phonemesamplerate) + "[] = {\n" )
 		for item in phoneme_list_adpcm:
-			fp.write ( f"{{ g_aby{item[1]}, {len(item[2])}, {item[3]} }},\n" )
+			fp.write ( f"{{ g_aby{item[1]}_{phonemesamplerate}, {len(item[2])}, {item[3]} }},\n" )
 		fp.write ( "\n};\n" )
 
 
